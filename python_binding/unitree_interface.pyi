@@ -1,13 +1,19 @@
 """
 Type definitions for General Unitree Interface Python bindings
 """
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Tuple
 from enum import Enum
 
 # Constants
 G1_NUM_MOTOR: int
 H1_NUM_MOTOR: int
 H1_2_NUM_MOTOR: int
+
+# Dex1-1 gripper topic names
+LEFT_DEX1_CMD_TOPIC: str
+LEFT_DEX1_STATE_TOPIC: str
+RIGHT_DEX1_CMD_TOPIC: str
+RIGHT_DEX1_STATE_TOPIC: str
 
 # Predefined configurations
 G1_HG_CONFIG: RobotConfig
@@ -314,12 +320,68 @@ def create_robot(network_interface: str, robot_type: RobotType,
 def create_robot_with_config(network_interface: str, config: RobotConfig) -> UnitreeInterface:
     """
     Create robot interface with configuration
-    
+
     Args:
         network_interface: Network interface name
         config: Robot configuration
-        
+
     Returns:
         UnitreeInterface instance for specified configuration
     """
-    ... 
+    ...
+
+
+# ---------------------------------------------------------------------------
+# Dex1-1 gripper interface (1-DOF parallel-jaw, MotorCmds_/MotorStates_ over
+# rt/dex1/{left,right}/{cmd,state}; bridged by the dex1_1_service binary).
+# ---------------------------------------------------------------------------
+
+class Dex1Type(Enum):
+    LEFT: int
+    RIGHT: int
+
+class Dex1State:
+    """Single-motor state for one Dex1-1 side."""
+    q: float          # motor position [rad]
+    dq: float         # motor velocity [rad/s]
+    tau_est: float    # estimated torque [N*m]
+    temperature: int  # motor temperature [°C]
+
+    def __init__(self) -> None: ...
+
+class Dex1Command:
+    """Single-motor command for one Dex1-1 side. mode=1 is position control."""
+    mode: int
+    q_target: float
+    dq_target: float
+    kp: float
+    kd: float
+    tau_ff: float
+
+    def __init__(self) -> None: ...
+
+class Dex1Interface:
+    """Dex1-1 gripper interface for one side. Talks to the running
+    dex1_1_gripper_server over DDS topics rt/dex1/{left,right}/{cmd,state}."""
+
+    def __init__(self, network_interface: str, side: Dex1Type, re_init: bool = True) -> None: ...
+
+    def read_state(self) -> Dex1State: ...
+    def write_command(self, command: Dex1Command) -> None: ...
+    def create_zero_command(self) -> Dex1Command: ...
+
+    def get_default_kp(self) -> float: ...
+    def get_default_kd(self) -> float: ...
+    def get_side(self) -> Dex1Type: ...
+    def get_side_name(self) -> str: ...
+
+    @staticmethod
+    def create_left(network_interface: str, re_init: bool = True) -> 'Dex1Interface': ...
+    @staticmethod
+    def create_right(network_interface: str, re_init: bool = True) -> 'Dex1Interface': ...
+
+
+def create_dex1_pair(network_interface: str, re_init: bool = True) -> Tuple[Dex1Interface, Dex1Interface]:
+    """Create both left and right Dex1-1 interfaces (left initializes DDS,
+    right reuses the existing factory)."""
+    ...

@@ -24,6 +24,10 @@
 #include <unitree/idl/hg/HandCmd_.hpp>
 #include <unitree/idl/hg/HandState_.hpp>
 
+// IDL - Dex1-1 gripper (parallel-jaw, 1 DOF, go2-namespace MotorCmds_/MotorStates_)
+#include <unitree/idl/go2/MotorCmds_.hpp>
+#include <unitree/idl/go2/MotorStates_.hpp>
+
 #include "unitree/common/thread/thread.hpp"
 
 using namespace unitree::common;
@@ -38,9 +42,15 @@ static const std::string TOPIC_JOYSTICK = "rt/wirelesscontroller";
 
 // Hand topic definitions
 static const std::string LEFT_HAND_CMD_TOPIC = "rt/dex3/left/cmd";
-static const std::string LEFT_HAND_STATE_TOPIC = "rt/dex3/left/state"; 
+static const std::string LEFT_HAND_STATE_TOPIC = "rt/dex3/left/state";
 static const std::string RIGHT_HAND_CMD_TOPIC = "rt/dex3/right/cmd";
 static const std::string RIGHT_HAND_STATE_TOPIC = "rt/dex3/right/state";
+
+// Dex1-1 gripper topics (1-DOF parallel jaw, separate from Dex3-1 hand topics)
+static const std::string LEFT_DEX1_CMD_TOPIC = "rt/dex1/left/cmd";
+static const std::string LEFT_DEX1_STATE_TOPIC = "rt/dex1/left/state";
+static const std::string RIGHT_DEX1_CMD_TOPIC = "rt/dex1/right/cmd";
+static const std::string RIGHT_DEX1_STATE_TOPIC = "rt/dex1/right/state";
 
 // Robot configurations
 enum class RobotType {
@@ -59,6 +69,13 @@ enum class MessageType {
 enum class HandType {
     LEFT_HAND = 0,
     RIGHT_HAND = 1
+};
+
+// Dex1-1 gripper side selector (1-DOF parallel-jaw, distinct from HandType
+// which addresses the 7-DOF Dex3-1 hand).
+enum class Dex1Type {
+    LEFT = 0,
+    RIGHT = 1
 };
 
 // Constants for Dex3-1 hands
@@ -194,6 +211,26 @@ struct PyHandState {
   float device_v = 0.0f;
   std::array<uint32_t, 2> error = {};
   std::array<uint32_t, 2> reserve = {};
+};
+
+// Dex1-1 single-motor state (parallel-jaw, 1 DOF). Mirrors the per-motor
+// fields the dex1_1_service emits in MotorStates_.states()[0].
+struct PyDex1State {
+  float q = 0.0f;
+  float dq = 0.0f;
+  float tau_est = 0.0f;
+  uint8_t temperature = 0;
+};
+
+// Dex1-1 single-motor command. mode=1 selects position control in the
+// service (matches test_gripper.cpp in dex1_1_service).
+struct PyDex1Command {
+  uint8_t mode = 1;
+  float q_target = 0.0f;
+  float dq_target = 0.0f;
+  float kp = 0.0f;
+  float kd = 0.0f;
+  float tau_ff = 0.0f;
 };
 
 enum class PyControlMode {
@@ -399,4 +436,49 @@ class HandInterface {
   // Static factory methods
   static std::shared_ptr<HandInterface> CreateLeftHand(const std::string& networkInterface, bool re_init = true);
   static std::shared_ptr<HandInterface> CreateRightHand(const std::string& networkInterface, bool re_init = true);
-}; 
+};
+
+// Dex1-1 gripper interface (1-DOF parallel jaw, MotorCmds_/MotorStates_
+// over rt/dex1/{left,right}/{cmd,state}). Mirrors HandInterface's threading
+// model: a recurrent writer thread re-publishes the latest buffered command,
+// while incoming state is delivered via a callback handler into a buffer.
+class Dex1Interface {
+ private:
+  Dex1Type side_;
+  std::string side_name_;
+
+  DataBuffer<PyDex1State> state_buffer_;
+  DataBuffer<PyDex1Command> command_buffer_;
+
+  std::shared_ptr<ChannelPublisher<unitree_go::msg::dds_::MotorCmds_>> cmd_publisher_;
+  std::shared_ptr<ChannelSubscriber<unitree_go::msg::dds_::MotorStates_>> state_subscriber_;
+
+  ThreadPtr command_writer_ptr_;
+
+  float default_kp_;
+  float default_kd_;
+
+  void InitDefaultGains();
+  void StateHandler(const void *message);
+  void CommandWriter();
+
+  void InitializeDDS(const std::string& networkInterface, bool re_init);
+
+ public:
+  explicit Dex1Interface(const std::string& networkInterface, Dex1Type side, bool re_init = true);
+  ~Dex1Interface();
+
+  // Python interface
+  PyDex1State ReadState();
+  void WriteCommand(const PyDex1Command& command);
+
+  // Utility
+  PyDex1Command CreateZeroCommand();
+  float GetDefaultKp() const { return default_kp_; }
+  float GetDefaultKd() const { return default_kd_; }
+  Dex1Type GetSide() const { return side_; }
+  std::string GetSideName() const { return side_name_; }
+
+  static std::shared_ptr<Dex1Interface> CreateLeft(const std::string& networkInterface, bool re_init = true);
+  static std::shared_ptr<Dex1Interface> CreateRight(const std::string& networkInterface, bool re_init = true);
+};

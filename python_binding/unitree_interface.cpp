@@ -704,4 +704,111 @@ std::shared_ptr<HandInterface> HandInterface::CreateLeftHand(const std::string& 
 
 std::shared_ptr<HandInterface> HandInterface::CreateRightHand(const std::string& networkInterface, bool re_init) {
     return std::make_shared<HandInterface>(networkInterface, HandType::RIGHT_HAND, re_init);
-} 
+}
+
+// =====================================================================
+// Dex1Interface — 1-DOF parallel-jaw gripper bridged via dex1_1_service
+// =====================================================================
+
+Dex1Interface::Dex1Interface(const std::string& networkInterface, Dex1Type side, bool re_init)
+    : side_(side) {
+    side_name_ = (side_ == Dex1Type::LEFT) ? "Dex1Left" : "Dex1Right";
+    InitDefaultGains();
+    InitializeDDS(networkInterface, re_init);
+}
+
+Dex1Interface::~Dex1Interface() {
+    if (command_writer_ptr_) {
+        command_writer_ptr_.reset();
+    }
+    cmd_publisher_.reset();
+    state_subscriber_.reset();
+}
+
+void Dex1Interface::InitDefaultGains() {
+    // Defaults match the values in dex1_1_service/test/test_gripper.cpp.
+    default_kp_ = 5.0f;
+    default_kd_ = 0.05f;
+}
+
+void Dex1Interface::InitializeDDS(const std::string& networkInterface, bool re_init) {
+    if (re_init) {
+        ChannelFactory::Instance()->Init(0, networkInterface);
+    }
+
+    const std::string cmd_topic = (side_ == Dex1Type::LEFT) ? LEFT_DEX1_CMD_TOPIC : RIGHT_DEX1_CMD_TOPIC;
+    const std::string state_topic = (side_ == Dex1Type::LEFT) ? LEFT_DEX1_STATE_TOPIC : RIGHT_DEX1_STATE_TOPIC;
+
+    cmd_publisher_ = std::make_shared<ChannelPublisher<unitree_go::msg::dds_::MotorCmds_>>(cmd_topic);
+    state_subscriber_ = std::make_shared<ChannelSubscriber<unitree_go::msg::dds_::MotorStates_>>(state_topic);
+
+    cmd_publisher_->InitChannel();
+    state_subscriber_->InitChannel(std::bind(&Dex1Interface::StateHandler, this, std::placeholders::_1), 1);
+
+    // 200 Hz republish — matches the cadence used by dex1_1_service's own
+    // test_gripper.cpp client. The service runs its serial loop at 1 kHz
+    // internally, so this rate keeps it well-fed without saturating DDS.
+    command_writer_ptr_ = CreateRecurrentThreadEx(
+        "dex1_command_writer", UT_CPU_ID_NONE, 5000, &Dex1Interface::CommandWriter, this);
+
+    std::cout << "Dex1Interface initialized: " << side_name_
+              << " on interface: " << networkInterface
+              << " (re_init: " << (re_init ? "true" : "false") << ")" << std::endl;
+}
+
+void Dex1Interface::StateHandler(const void *message) {
+    const auto& msg = *(const unitree_go::msg::dds_::MotorStates_ *)message;
+    if (msg.states().empty()) {
+        return;
+    }
+    PyDex1State s;
+    const auto& m0 = msg.states()[0];
+    s.q = m0.q();
+    s.dq = m0.dq();
+    s.tau_est = m0.tau_est();
+    s.temperature = m0.temperature();
+    state_buffer_.SetData(s);
+}
+
+void Dex1Interface::CommandWriter() {
+    const std::shared_ptr<const PyDex1Command> cmd = command_buffer_.GetData();
+    if (!cmd) {
+        return;
+    }
+
+    unitree_go::msg::dds_::MotorCmds_ msg;
+    msg.cmds().resize(1);
+    auto& m0 = msg.cmds()[0];
+    m0.mode() = cmd->mode;
+    m0.q() = cmd->q_target;
+    m0.dq() = cmd->dq_target;
+    m0.tau() = cmd->tau_ff;
+    m0.kp() = cmd->kp;
+    m0.kd() = cmd->kd;
+
+    cmd_publisher_->Write(msg);
+}
+
+PyDex1State Dex1Interface::ReadState() {
+    const std::shared_ptr<const PyDex1State> s = state_buffer_.GetData();
+    return s ? *s : PyDex1State{};
+}
+
+void Dex1Interface::WriteCommand(const PyDex1Command& command) {
+    command_buffer_.SetData(command);
+}
+
+PyDex1Command Dex1Interface::CreateZeroCommand() {
+    PyDex1Command cmd;
+    cmd.kp = default_kp_;
+    cmd.kd = default_kd_;
+    return cmd;
+}
+
+std::shared_ptr<Dex1Interface> Dex1Interface::CreateLeft(const std::string& networkInterface, bool re_init) {
+    return std::make_shared<Dex1Interface>(networkInterface, Dex1Type::LEFT, re_init);
+}
+
+std::shared_ptr<Dex1Interface> Dex1Interface::CreateRight(const std::string& networkInterface, bool re_init) {
+    return std::make_shared<Dex1Interface>(networkInterface, Dex1Type::RIGHT, re_init);
+}

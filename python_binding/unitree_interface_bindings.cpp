@@ -30,6 +30,11 @@ PYBIND11_MODULE(unitree_interface, m) {
         .value("LEFT_HAND", HandType::LEFT_HAND)
         .value("RIGHT_HAND", HandType::RIGHT_HAND)
         .export_values();
+
+    py::enum_<Dex1Type>(m, "Dex1Type")
+        .value("LEFT", Dex1Type::LEFT)
+        .value("RIGHT", Dex1Type::RIGHT)
+        .export_values();
     
     // Data structures
     py::class_<PyImuState>(m, "ImuState")
@@ -119,6 +124,23 @@ PYBIND11_MODULE(unitree_interface, m) {
         .def_readwrite("device_v", &PyHandState::device_v)
         .def_readwrite("error", &PyHandState::error)
         .def_readwrite("reserve", &PyHandState::reserve);
+
+    // Dex1-1 single-motor structs (1-DOF parallel jaw)
+    py::class_<PyDex1State>(m, "Dex1State")
+        .def(py::init<>())
+        .def_readwrite("q", &PyDex1State::q)
+        .def_readwrite("dq", &PyDex1State::dq)
+        .def_readwrite("tau_est", &PyDex1State::tau_est)
+        .def_readwrite("temperature", &PyDex1State::temperature);
+
+    py::class_<PyDex1Command>(m, "Dex1Command")
+        .def(py::init<>())
+        .def_readwrite("mode", &PyDex1Command::mode)
+        .def_readwrite("q_target", &PyDex1Command::q_target)
+        .def_readwrite("dq_target", &PyDex1Command::dq_target)
+        .def_readwrite("kp", &PyDex1Command::kp)
+        .def_readwrite("kd", &PyDex1Command::kd)
+        .def_readwrite("tau_ff", &PyDex1Command::tau_ff);
     
     // Main interface class
     py::class_<UnitreeInterface, std::shared_ptr<UnitreeInterface>>(m, "UnitreeInterface")
@@ -253,4 +275,41 @@ PYBIND11_MODULE(unitree_interface, m) {
     m.attr("LEFT_HAND_STATE_TOPIC") = LEFT_HAND_STATE_TOPIC;
     m.attr("RIGHT_HAND_CMD_TOPIC") = RIGHT_HAND_CMD_TOPIC;
     m.attr("RIGHT_HAND_STATE_TOPIC") = RIGHT_HAND_STATE_TOPIC;
-} 
+
+    // Dex1-1 gripper interface
+    py::class_<Dex1Interface, std::shared_ptr<Dex1Interface>>(m, "Dex1Interface")
+        .def(py::init<const std::string&, Dex1Type, bool>(),
+             py::arg("network_interface"), py::arg("side"), py::arg("re_init") = true,
+             "Initialize Dex1-1 gripper interface for one side")
+
+        .def("read_state", &Dex1Interface::ReadState,
+             "Read latest single-motor gripper state (q, dq, tau_est, temperature)")
+        .def("write_command", &Dex1Interface::WriteCommand,
+             "Buffer a single-motor command; the writer thread republishes at 200 Hz")
+        .def("create_zero_command", &Dex1Interface::CreateZeroCommand,
+             "Create a zero-target command preloaded with default kp/kd")
+
+        .def("get_default_kp", &Dex1Interface::GetDefaultKp)
+        .def("get_default_kd", &Dex1Interface::GetDefaultKd)
+        .def("get_side", &Dex1Interface::GetSide)
+        .def("get_side_name", &Dex1Interface::GetSideName)
+
+        .def_static("create_left", &Dex1Interface::CreateLeft,
+                   py::arg("network_interface"), py::arg("re_init") = true)
+        .def_static("create_right", &Dex1Interface::CreateRight,
+                   py::arg("network_interface"), py::arg("re_init") = true);
+
+    m.def("create_dex1_pair", [](const std::string& network_interface, bool re_init = true) {
+        auto left = Dex1Interface::CreateLeft(network_interface, re_init);
+        auto right = Dex1Interface::CreateRight(network_interface, false);
+        return py::make_tuple(left, right);
+    }, py::arg("network_interface"), py::arg("re_init") = true,
+       "Create both left and right Dex1-1 gripper interfaces. Left initializes "
+       "DDS (unless re_init=False because the caller already did), right reuses it.");
+
+    // Dex1-1 topic names
+    m.attr("LEFT_DEX1_CMD_TOPIC") = LEFT_DEX1_CMD_TOPIC;
+    m.attr("LEFT_DEX1_STATE_TOPIC") = LEFT_DEX1_STATE_TOPIC;
+    m.attr("RIGHT_DEX1_CMD_TOPIC") = RIGHT_DEX1_CMD_TOPIC;
+    m.attr("RIGHT_DEX1_STATE_TOPIC") = RIGHT_DEX1_STATE_TOPIC;
+}
