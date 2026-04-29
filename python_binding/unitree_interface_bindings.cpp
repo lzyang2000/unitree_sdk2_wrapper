@@ -160,6 +160,16 @@ PYBIND11_MODULE(unitree_interface, m) {
         .def("create_zero_command", &UnitreeInterface::CreateZeroCommand)
         .def("get_default_kp", &UnitreeInterface::GetDefaultKp)
         .def("get_default_kd", &UnitreeInterface::GetDefaultKd)
+
+        // Motion switcher (release high-level service before LowCmd takes effect)
+        .def("release_motion_control", &UnitreeInterface::ReleaseMotionControl,
+             py::arg("timeout_sec") = 30.0f,
+             "Release any active high-level motion control service so LowCmd "
+             "writes take effect. Polls CheckMode/ReleaseMode at 1 Hz until no "
+             "mode is active or the timeout elapses. Returns True on success.")
+        .def("check_motion_mode", &UnitreeInterface::CheckMotionMode,
+             "Return the currently-active high-level motion mode name, or an "
+             "empty string when no service is running.")
         
         // Configuration methods
         .def("get_config", &UnitreeInterface::GetConfig)

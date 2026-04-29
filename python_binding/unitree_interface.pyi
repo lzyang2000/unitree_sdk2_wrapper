@@ -241,6 +241,28 @@ class UnitreeInterface:
         """
         ...
 
+    def release_motion_control(self, timeout_sec: float = 30.0) -> bool:
+        """
+        Release any active high-level motion control service (loco/sport) so
+        that LowCmd writes are not fought by it. Polls CheckMode/ReleaseMode
+        at 1 Hz until no mode is active or the timeout elapses.
+
+        Args:
+            timeout_sec: Maximum time to wait for release.
+
+        Returns:
+            True if the high-level service was released (or already inactive),
+            False if it was still active when the timeout elapsed.
+        """
+        ...
+
+    def check_motion_mode(self) -> str:
+        """
+        Return the currently-active high-level motion mode name, or an empty
+        string when no high-level service is running.
+        """
+        ...
+
     @staticmethod
     def create_g1(network_interface: str, message_type: MessageType = MessageType.HG) -> 'UnitreeInterface':
         """

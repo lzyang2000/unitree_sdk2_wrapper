@@ -28,6 +28,11 @@
 #include <unitree/idl/go2/MotorCmds_.hpp>
 #include <unitree/idl/go2/MotorStates_.hpp>
 
+// MotionSwitcherClient — releases the high-level motion control service so
+// LowCmd writes are not fought by loco/sport. Same release pattern as
+// example/g1/low_level/g1_ankle_swing_example.cpp.
+#include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
+
 #include "unitree/common/thread/thread.hpp"
 
 using namespace unitree::common;
@@ -310,6 +315,11 @@ class UnitreeInterface {
   ThreadPtr command_writer_ptr_;
   std::mutex wireless_mutex_;
 
+  // Lazy-constructed on first ReleaseMotionControl/CheckMotionMode call.
+  // Construction requires the DDS factory to be initialized, so we hold off
+  // until the user actually asks for it (vs. doing it in the ctor).
+  std::shared_ptr<unitree::robot::b2::MotionSwitcherClient> motion_switcher_;
+
   // Default gains
   std::vector<float> default_kp_;
   std::vector<float> default_kd_;
@@ -356,6 +366,13 @@ class UnitreeInterface {
   PyMotorCommand CreateZeroCommand();
   std::vector<float> GetDefaultKp() const;
   std::vector<float> GetDefaultKd() const;
+
+  // Motion switcher: poll/release any active high-level motion service so
+  // LowCmd writes take effect. Mirrors the SDK's g1_ankle_swing_example
+  // release pattern. CheckMotionMode returns the active mode name (empty
+  // string when no high-level service is running).
+  bool ReleaseMotionControl(float timeout_sec = 30.0f);
+  std::string CheckMotionMode();
   
   // Configuration methods
   RobotConfig GetConfig() const { return config_; }

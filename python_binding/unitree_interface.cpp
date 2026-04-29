@@ -2,6 +2,8 @@
 #include <iostream>
 #include <unistd.h>
 #include <iomanip>
+#include <chrono>
+#include <thread>
 
 // Constructor implementations
 UnitreeInterface::UnitreeInterface(const std::string& networkInterface, RobotType robot_type, MessageType message_type)
@@ -378,6 +380,51 @@ std::vector<float> UnitreeInterface::GetDefaultKp() const {
 
 std::vector<float> UnitreeInterface::GetDefaultKd() const {
     return default_kd_;
+}
+
+// Motion switcher (high-level service release). Lazy-init the client so
+// callers who don't need it pay nothing, and so we can be sure the DDS
+// factory has already been initialized by InitializeDDS.
+std::string UnitreeInterface::CheckMotionMode() {
+    if (!motion_switcher_) {
+        motion_switcher_ = std::make_shared<unitree::robot::b2::MotionSwitcherClient>();
+        motion_switcher_->SetTimeout(5.0f);
+        motion_switcher_->Init();
+    }
+    std::string form, name;
+    motion_switcher_->CheckMode(form, name);
+    return name;
+}
+
+bool UnitreeInterface::ReleaseMotionControl(float timeout_sec) {
+    if (!motion_switcher_) {
+        motion_switcher_ = std::make_shared<unitree::robot::b2::MotionSwitcherClient>();
+        motion_switcher_->SetTimeout(5.0f);
+        motion_switcher_->Init();
+    }
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(static_cast<int64_t>(timeout_sec * 1000.0f));
+    std::string form, name;
+    while (true) {
+        motion_switcher_->CheckMode(form, name);
+        if (name.empty()) {
+            std::cout << "[MotionSwitcher] No active high-level mode; LowCmd writes will take effect." << std::endl;
+            return true;
+        }
+        std::cout << "[MotionSwitcher] Active mode form='" << form
+                  << "' name='" << name << "'. Calling ReleaseMode..." << std::endl;
+        int32_t rc = motion_switcher_->ReleaseMode();
+        if (rc != 0) {
+            std::cout << "[MotionSwitcher] ReleaseMode returned " << rc
+                      << " (will retry)." << std::endl;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            std::cout << "[MotionSwitcher] Timed out after " << timeout_sec
+                      << "s waiting for release; mode still '" << name << "'." << std::endl;
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 }
 
 // Static factory methods
