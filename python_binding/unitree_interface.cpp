@@ -284,9 +284,22 @@ void UnitreeInterface::LowCommandWriter() {
     } else {
         // Write GO2 command
         unitree_go::msg::dds_::LowCmd_ dds_low_command;
+        // Go2 firmware validates these header bytes (see example/go2/go2_low_level.cpp).
+        dds_low_command.head()[0] = 0xFE;
+        dds_low_command.head()[1] = 0xEF;
+        dds_low_command.level_flag() = 0xFF;
+        dds_low_command.gpio() = 0;
+        // Motors beyond num_motors: PMSM mode + stop values (Go2 convention).
+        constexpr float kPosStopF = 2.146e9f;
+        constexpr float kVelStopF = 16000.0f;
+        for (size_t i = config_.num_motors; i < 20; ++i) {
+            dds_low_command.motor_cmd().at(i).mode() = 0x01;
+            dds_low_command.motor_cmd().at(i).q() = kPosStopF;
+            dds_low_command.motor_cmd().at(i).dq() = kVelStopF;
+        }
         // dds_low_command.mode_pr() = static_cast<uint8_t>(mode_);
         // dds_low_command.mode_machine() = mode_machine_;
-        
+
         for (size_t i = 0; i < config_.num_motors; i++) {
             dds_low_command.motor_cmd().at(i).mode() = 1;
             dds_low_command.motor_cmd().at(i).tau() = mc->tau_ff[i];
