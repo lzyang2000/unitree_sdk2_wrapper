@@ -41,6 +41,8 @@ using namespace unitree::robot;
 // Topic definitions
 static const std::string HG_CMD_TOPIC = "rt/lowcmd";
 static const std::string HG_STATE_TOPIC = "rt/lowstate";
+// Secondary (torso) IMU. Its own topic, NOT a field of LowState_.
+static const std::string HG_IMU_TORSO_TOPIC = "rt/secondary_imu";
 static const std::string GO2_CMD_TOPIC = "rt/lowcmd";
 static const std::string GO2_STATE_TOPIC = "rt/lowstate";
 static const std::string TOPIC_JOYSTICK = "rt/wirelesscontroller";
@@ -168,6 +170,12 @@ struct PyWirelessController {
 
 struct PyLowState {
   PyImuState imu;
+  // Secondary (torso) IMU, published on its own DDS topic rather than inside LowState.
+  // `imu_torso_valid` is false until one has actually arrived, so a caller can tell an
+  // absent topic from a genuinely level torso -- an all-zero quaternion is a claim, not
+  // an absence.
+  PyImuState imu_torso;
+  bool imu_torso_valid = false;
   PyMotorState motor;
   uint8_t mode_machine = 0;
   
@@ -305,11 +313,13 @@ class UnitreeInterface {
   DataBuffer<MotorState> motor_state_buffer_;
   DataBuffer<MotorCommand> motor_command_buffer_;
   DataBuffer<ImuState> imu_state_buffer_;
+  DataBuffer<ImuState> imu_torso_buffer_;
   DataBuffer<PyWirelessController> wireless_controller_buffer_;
 
   // DDS components - using void pointers for type flexibility
   std::shared_ptr<void> lowcmd_publisher_;
   std::shared_ptr<void> lowstate_subscriber_;
+  std::shared_ptr<void> imutorso_subscriber_;
   std::shared_ptr<void> wireless_subscriber_;
   
   ThreadPtr command_writer_ptr_;
@@ -326,6 +336,7 @@ class UnitreeInterface {
 
   void InitDefaultGains();
   void LowStateHandler(const void *message);
+  void ImuTorsoHandler(const void *message);
   void WirelessControllerHandler(const void *message);
   void LowCommandWriter();
   

@@ -35,6 +35,7 @@ UnitreeInterface::~UnitreeInterface() {
     }
     lowcmd_publisher_.reset();
     lowstate_subscriber_.reset();
+    imutorso_subscriber_.reset();
     wireless_subscriber_.reset();
 }
 
@@ -126,6 +127,12 @@ void UnitreeInterface::InitializeDDS(const std::string& networkInterface) {
         
         auto hg_publisher = std::static_pointer_cast<ChannelPublisher<unitree_hg::msg::dds_::LowCmd_>>(lowcmd_publisher_);
         hg_publisher->InitChannel();
+
+        // Secondary (torso) IMU on its own topic. Best-effort: if the robot does not
+        // publish it, the buffer simply stays empty and imu_torso_valid stays false.
+        imutorso_subscriber_ = std::make_shared<ChannelSubscriber<unitree_hg::msg::dds_::IMUState_>>(HG_IMU_TORSO_TOPIC);
+        auto torso_subscriber = std::static_pointer_cast<ChannelSubscriber<unitree_hg::msg::dds_::IMUState_>>(imutorso_subscriber_);
+        torso_subscriber->InitChannel(std::bind(&UnitreeInterface::ImuTorsoHandler, this, std::placeholders::_1), 1);
         
     } else {
         // GO2 message type
@@ -179,6 +186,16 @@ void UnitreeInterface::LowStateHandler(const void *message) {
         
         ProcessLowState(low_state);
     }
+}
+
+void UnitreeInterface::ImuTorsoHandler(const void *message) {
+    const unitree_hg::msg::dds_::IMUState_ imu = *(const unitree_hg::msg::dds_::IMUState_ *)message;
+    ImuState tmp;
+    tmp.omega = imu.gyroscope();
+    tmp.rpy = imu.rpy();
+    tmp.quat = imu.quaternion();
+    tmp.accel = imu.accelerometer();
+    imu_torso_buffer_.SetData(tmp);
 }
 
 void UnitreeInterface::ProcessLowState(const unitree_hg::msg::dds_::LowState_& low_state) {
@@ -335,6 +352,15 @@ PyLowState UnitreeInterface::ConvertToPyLowState() {
         py_state.imu.omega = imu->omega;
         py_state.imu.quat = imu->quat;
         py_state.imu.accel = imu->accel;
+    }
+
+    const std::shared_ptr<const ImuState> imu_t = imu_torso_buffer_.GetData();
+    if (imu_t) {
+        py_state.imu_torso.rpy = imu_t->rpy;
+        py_state.imu_torso.omega = imu_t->omega;
+        py_state.imu_torso.quat = imu_t->quat;
+        py_state.imu_torso.accel = imu_t->accel;
+        py_state.imu_torso_valid = true;
     }
     
     py_state.mode_machine = mode_machine_;

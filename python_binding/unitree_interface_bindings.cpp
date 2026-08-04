@@ -71,6 +71,8 @@ PYBIND11_MODULE(unitree_interface, m) {
     py::class_<PyLowState>(m, "LowState")
         .def(py::init<int>())
         .def_readwrite("imu", &PyLowState::imu)
+        .def_readwrite("imu_torso", &PyLowState::imu_torso)
+        .def_readwrite("imu_torso_valid", &PyLowState::imu_torso_valid)
         .def_readwrite("motor", &PyLowState::motor)
         .def_readwrite("mode_machine", &PyLowState::mode_machine);
     
